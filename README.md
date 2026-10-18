@@ -5,6 +5,14 @@
 A swarm of workers with [Felix](https://github.com/GetFelix/felix) as its only
 backend.
 
+![Eight agents reviewing a pull request: tasks fan out, a worker dies and its task goes to another, an injected agent's writes are refused, and the run scrubs back](docs/screenshots/swarm.gif)
+
+<sub>The viewer's style frame playing a hand-written run
+([prototype/style-frame.html](prototype/style-frame.html), full size:
+[swarm.mp4](docs/screenshots/swarm.mp4)). Nothing talks to Felix yet.</sub>
+
+![An injected agent's writes refused](docs/screenshots/swarm-injection.png)
+
 A planner fans work out as tasks, many workers claim them, and results flow
 back. Workers join, leave and die mid-task, and the run carries on: Felix hands
 each task to one worker and gives it to another when that worker stops
@@ -81,7 +89,7 @@ when you open a step. [docs/design.md](docs/design.md) has the details.
 
 | M | Milestone | What it proves | State |
 |---|---|---|---|
-| 0 | The viewer, locked | The swarm reads well, at 8 workers and at 50, before Felix is involved | Planned |
+| 0 | The viewer, locked | The swarm reads well, at 8 workers and at 50, before Felix is involved | In progress: [style frame](docs/art.md) |
 | 1 | Tasks through Felix | One worker per task, even when workers die; poison tasks stop | Planned |
 | 2 | Shared state | The board and locks never silently overwrite | Planned |
 | 3 | Real models and budgets | A run never spends past its limit | Planned |
@@ -93,6 +101,7 @@ when you open a step. [docs/design.md](docs/design.md) has the details.
 ## Documentation
 
 - [docs/design.md](docs/design.md): the design, data model and build order
+- [docs/art.md](docs/art.md): how the viewer looks and moves
 - [Felix docs](https://docs.getfelix.dev/)
 
 ## Contributing

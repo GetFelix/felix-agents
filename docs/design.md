@@ -1,26 +1,35 @@
 # Felix Agents design
 
-Coordination for a team of AI agents whose only backend is
-[Felix](https://github.com/GetFelix/felix). A planner breaks a job into tasks,
-workers claim them, share what they learn, take locks on what they change and
-spend from a budget, and every step lands in one durable log. Afterwards, or
-while it runs, you open the run in a browser and scrub back through it: what
-each agent saw, claimed, wrote, said and spent, at any moment.
+Felix Agents models a swarm of workers with
+[Felix](https://github.com/GetFelix/felix) as its only backend. A planner fans
+work out as tasks, many workers claim them, results flow back, and workers
+join, leave and die mid-task while the run carries on. Workers share what they
+find, lock what they change and spend from a common budget, and every step
+lands in one durable log. While it runs, or afterwards, you open the run in a
+browser and watch the swarm: tasks travelling to the workers that claimed
+them, results coming back, a dead worker's task going back to the queue, and
+the budget draining. The same view scrubs back to any moment.
+
+In the headline demo the workers are AI agents reviewing a pull request. They
+are the hardest kind of worker to coordinate, because they are slow,
+expensive, and act on what a model tells them. But the swarm is the subject:
+the same tasks, board, leases and log serve any job that fans out to workers
+that come and go.
 
 [felix-arena](https://github.com/GetFelix/felix-arena) uses a log as a live
 feed and a replay. [felix-metro](https://github.com/GetFelix/felix-metro)
 seeks back through a long history. [felix-blocks](https://github.com/GetFelix/felix-blocks)
 is keyed state that many writers change at once. Felix Agents puts those
-together for a workload that is in demand and badly served: work handed out
-exactly once to processes that die, state shared between writers that guess,
-and a record of the whole thing you can trust after something went wrong.
+together for work handed out exactly once to processes that die, state shared
+between writers that guess, and a record of the whole thing you can trust
+after something went wrong.
 
 **In scope**
 
 - An MCP server, `felix-mcp`, that gives any MCP host (Claude Code, the Claude Agent SDK, other vendors' hosts) Felix-backed tools: tasks, a shared board, leases, messages, artifacts and the run's budget
 - A small runtime, `agents-run`, that drives a planner and workers against a model API, records spend and heartbeats, and has a scripted stand-in for every role so the demo runs without a model
 - A tool, `agents-tool`, that creates a run's resources, the agents' identities and their grants, and exports a finished run
-- A viewer in the browser that follows a run live and replays it, through felix-gateway
+- A viewer in the browser that draws the swarm live and replays it, through felix-gateway
 - One headline demo job: a planner splits a pull request review into tasks for four to eight workers
 
 **Out of scope**
@@ -33,13 +42,14 @@ and a record of the whole thing you can trust after something went wrong.
 
 ## What it has to demonstrate
 
-1. **A task is done by one worker, even when workers die.** Killing a worker mid-task hands its task to another within a minute. No task is lost, and a task that does get done twice is recorded once.
+1. **A task is done by one worker, even when workers come and go.** Killing a worker mid-task hands its task to another within a minute. No task is lost, and a task that does get done twice is recorded once.
 2. **A poison task stops costing money.** A task that keeps failing, or that a worker judges impossible, is dead-lettered after a bounded number of attempts and shown as such.
 3. **Shared state is never silently overwritten.** Two agents writing the same board key, or taking the same lease, never both succeed against the same version.
 4. **A run is a complete record.** From any point on the timeline the viewer shows the board, the tasks, the leases, who was alive, the messages and the spend as they were, in under a second, and following live from there has no gap.
 5. **Budgets hold.** A run never spends more than its limit plus one call's reservation, however many workers race for it.
 6. **A prompt-injected agent can only write where its token allows.** Felix refuses the rest, whatever the model asks for, and every refused attempt is in the record under the agent's verified identity.
 7. **Any MCP host can take part.** An agent in Claude Code joins a run by adding `felix-mcp` to its config, with no Felix code of its own.
+8. **You can watch the swarm work.** The viewer shows each task travel to the worker that claimed it and its result travel back, a dead worker's task return to the queue and go to another, and the budget drain, live and when scrubbing back, drawn from the run log alone. A burst of hundreds of tasks stays readable.
 
 ## Architecture
 
@@ -66,7 +76,7 @@ flowchart LR
 | `felix-mcp` | Rust, `core` + `felix-client` | No | The MCP server. One process per agent, holding that agent's token. Every tool call is a Felix operation and a run log record |
 | `agents-run` | Rust, `core` + `felix-client` | No | Calls the model, feeds it the tools `felix-mcp` offers, reserves and records spend, heartbeats, scripted stand-ins |
 | `agents-tool` | Rust, `core` + control plane REST | No | Create a run, issue agent identities, grant roles, export a run |
-| Viewer | TypeScript, `core` as WebAssembly | A run folded to one offset | Timeline, agent lanes, task board, shared board, leases, spend, the injection view |
+| Viewer | TypeScript, `core` as WebAssembly | A run folded to one offset | The swarm view, the timeline, the board with its locks, spend, the step panel |
 | Gateway | [felix-gateway](https://github.com/GetFelix/felix-gateway) | No | Browser transport, read-only scope per run |
 | Brokers | Felix | Yes, authoritative | Every resource below |
 | Control plane | Felix | Yes, metadata | Token exchange, RBAC policies and assignments |
@@ -148,6 +158,8 @@ only speak for the agent that wrote it.
 | Kind | Written by | Details |
 |---|---|---|
 | `run_started`, `run_ended` | `agents-tool`, `agents-run` | Goal, budget, agents, outcome |
+| `agent_up` | `agents-run` | Role, model, presence version |
+| `agent_gone` | `felix-mcp` (planner) | Which agent, the presence version that expired |
 | `task_posted` | `felix-mcp` (planner) | Task id, parent, title, tasks stream offset |
 | `task_claimed`, `task_extended`, `task_released` | `felix-mcp` | Task id, attempt, deadline |
 | `task_done`, `task_duplicate` | `felix-mcp` | Task id, result artifact, whether this result won |
@@ -155,6 +167,7 @@ only speak for the agent that wrote it.
 | `board_put`, `board_conflict` | `felix-mcp` | Key, version written or version found, value artifact |
 | `lease_taken`, `lease_renewed`, `lease_released`, `lease_lost` | `felix-mcp` | Key, version, TTL |
 | `message` | `felix-mcp` | To, correlation id, offset in the messages stream |
+| `model_started` | `agents-run` | Task id, the reservation taken |
 | `model_call` | `agents-run` | Prompt and response artifacts, tokens, cost |
 | `refused` | `felix-mcp` | The operation, the resource, Felix's error |
 
@@ -228,6 +241,14 @@ stops is gone 15 seconds later and every watcher sees the delete. This is the
 runtime's job, not the model's, so a model that loops does not look dead and
 a dead process does not look alive.
 
+The run log has to show workers coming and going, so the viewer can draw it
+without watching caches. `agents-run` logs `agent_up` when it starts. The
+planner's `felix-mcp` watches the presence cache and logs `agent_gone` when a
+key expires or is deleted. A dead worker cannot write its own departure, and
+the planner is the one agent that is there for the whole run. If the planner
+is the one that died, the fold still shows each worker's claim lapsing at its
+deadline, so nothing in the view waits on a record from a process that is gone.
+
 ### Messages
 
 `send` publishes to the messages stream with the recipient as the routing key
@@ -248,7 +269,7 @@ scope.
 A counter answers an add with the new sum in one round trip
 (`what-felix-is-for.md:160` in Felix), so a budget is a reservation:
 
-1. Before a model call, `agents-run` adds the call's worst case (its `max_tokens` priced at the model's rate) to the run's and the agent's spend counters.
+1. Before a model call, `agents-run` adds the call's worst case (its `max_tokens` priced at the model's rate) to the run's and the agent's spend counters, and logs `model_started` with the reservation.
 2. If either sum is now over its limit, it adds the same amount back and stops the agent with `budget_exhausted`.
 3. After the call it adds the difference between the actual cost and the reservation, and logs a `model_call` record.
 
@@ -334,26 +355,182 @@ and subscribing from an offset (`crates/felix-gateway/src/protocol.rs:38-45, 122
 in felix-gateway). Its TypeScript client has no API for `read` yet (gap 5),
 the gateway has no time lookup for "go to 14:05" (gap 6), and it does not pass
 on the publisher Felix recorded, which the viewer needs to attribute records
-it did not see published (gap 7).
+it did not see published (gap 7). Nor does it pass on the time the broker
+appended each record, which is the one clock every agent's records share
+(gap 9).
 
 ## The viewer
 
-- Plain TypeScript, no UI framework, built with Vite, with `core` as WebAssembly.
-- A timeline across the bottom with a playhead, markers for task posts, dead letters, conflicts and refusals, and a spend curve.
-- One lane per agent: alive or gone, the task it holds, its model calls as blocks sized by tokens, its tool calls, refusals in red.
-- A task board (posted, claimed, done, dead), the shared board with versions, and the leases with their holders and time left.
-- Clicking any block opens the prompt, the response or the tool output.
-- The Felix brand: cyan `hsl(192, 90%, 46%)` for accents and the playhead, Inter for text, JetBrains Mono for ids, offsets and numbers. Dark by default.
+The viewer draws the swarm: who is working, what is travelling between them,
+what is locked and how much money is left. It is one page with three parts:
+the swarm view, the board beside it, and a timeline along the bottom.
+
+```text
++--------------------------------------------+-------------------------+
+|            w1          w2                  | Board                   |
+|     w8      .          .      w3           | src/auth.rs  v41  [w2]  |
+|              .  planner  .                 | src/db.rs    v38        |
+|  w7 . . . . .  (queue)   . . . . . w4      | shared-api   v12  [w5]  |
+|              .  budget   .                 |                         |
+|     x6      .          .      w5           |                         |
+|                                            |                         |
++--------------------------------------------+-------------------------+
+| timeline: markers, spend curve, playhead    1x 4x 16x live           |
++----------------------------------------------------------------------+
+```
+
+`x6` is a worker that died, and `[w2]` a lock held by `w2`.
+
+### Layout: a fixed ring
+
+The planner and the task queue sit in the middle. Workers sit on a ring
+around them, each in a slot given by the order it first joined. Tasks travel
+out along the spokes, results travel back in, and messages between workers
+cross the ring as curved chords.
+
+A fixed ring was picked over a force graph and over lanes:
+
+- **Scrubbing needs positions that do not move.** A force graph settles
+  differently every time it is laid out, so seeking to a moment puts workers
+  somewhere else and the eye has to find them again. A ring slot is a pure
+  function of join order, so every frame of a run, live or replayed, puts
+  `w3` in the same place.
+- **The shape is the work pattern.** A consumer group is one queue and many
+  consumers. Hub and spokes draw exactly that, and a fan-out reads as packets
+  leaving the middle in every direction. Lanes are good at time, which the
+  timeline already shows, and bad at flow between agents.
+- **Coming and going does not reflow anything.** A dead worker leaves a faded
+  slot, and a worker restarted under the same name lights the same slot up
+  again. A worker new to the run takes the next free slot.
+
+The ring holds 32 workers at laptop width with room for a label each. Up to 64
+go on two rings, the second offset by half a slot. Past that, nodes become dots
+with labels on hover, which covers a run of 50 agents. On a phone the
+board moves below the ring and labels appear on tap.
+
+### What each element is drawn from
+
+The viewer folds the run log and nothing else. Every element below is a
+function of the fold at the playhead, so a live run and a replay of it draw
+the same frames.
+
+| Element | Drawn from | What it shows in Felix |
+|---|---|---|
+| A worker node appearing | `agent_up` | A new member of the run, with its own principal |
+| A worker going dark | `agent_gone`, or its claim passing its deadline | A presence entry's TTL running out |
+| A task packet, planner to queue | `task_posted` | A publish to the tasks stream |
+| Queue depth in the hub | Tasks posted and not yet claimed, done or dead; a lapsed claim puts one back | Records the consumer group has not handed out |
+| A task packet, queue to worker | `task_claimed` | A consumer group delivery to one named member |
+| The claim timer around a node | The deadline in `task_claimed` and `task_extended` | The visibility timeout and its extensions |
+| A task travelling back to the queue | The claim's deadline passing with no extension | A lapsed claim; the next `task_claimed` for it, at the next attempt, confirms it |
+| A result packet, worker to planner | `task_done` | The `cache_put_if` absent on the results key winning |
+| A result that fades halfway | `task_duplicate` | A redelivered copy finishing second |
+| A task dropping out of the hub | `task_dead` | Max attempts used up, or the worker giving up |
+| A board card and its version | `board_put` | A conditional write to the board cache |
+| A write bouncing off a card | `board_conflict` | `cache_put_if` refused at a stale version |
+| A lock on a board card, with a draining arc | `lease_taken`, `lease_renewed`, `lease_released`, `lease_lost` | A lease key in the leases cache and its TTL |
+| A chord between two workers | `message` | A publish to the messages stream, from its recorded publisher |
+| A pulse on a node while it thinks | `model_started` to `model_call` | One model call; the pulse's weight is its tokens |
+| The budget ring around the hub | `run_started` for the limit, `model_started` and `model_call` for spend | The spend counters: reservations hatched, spend solid |
+| A red bounce off whatever was targeted | `refused` | The broker refusing a write outside the agent's grants |
+
+A board card's subject and a lease key share a name (a file path, in the pull
+request review), which is how a lock lands on the right card. A lease on a
+subject with no card yet gets a placeholder card.
+
+Who did something comes from the publisher Felix recorded, not from the
+payload. Until felix-gateway passes it on (gap 7), the viewer marks
+attribution as unverified. Times come from the broker's append time once the
+gateway passes it on (gap 9); until then from the writer's clock, clamped so
+time never goes backwards in offset order.
+
+### How the browser gets it
+
+One WebSocket to felix-gateway, joined with a read-only scope for the run: the
+run log (subscribe and `read`) and the artifacts cache (`cache_get`). The
+viewer asks for the `read` and `binary_events` features.
+
+1. Read the run log in pages from offset 0 to the tail, folding as pages
+   arrive, so the view fills in rather than waiting for the last page.
+2. Subscribe from the `next_offset` of the last page. Felix delivers from that
+   offset, so the join has no gap or repeat.
+3. Fetch artifacts with `cache_get` only when a step is opened.
+
+The viewer does not watch the board, leases or presence caches, and does not
+read the spend counters (the gateway can only add to a counter, not read
+one). That is deliberate: if the view came partly from live caches, it could
+not be replayed, and the test that the fold of the log matches the caches
+would have nothing to check.
+
+### Motion and aggregation
+
+A packet's flight takes 600 ms at 1x. Packet positions are a pure function of
+the record's time and the playhead, so pausing freezes packets mid-flight and
+seeking lands on the same frame live play would have drawn.
+
+A burst has to stay readable. A planner posting 300 tasks in two seconds would
+otherwise be 300 overlapping squares. The rules:
+
+- **Packets on the same edge merge.** Records that would put packets on the
+  same edge within 250 ms fly as one packet with a count (`x24`), its size
+  growing with the log of the count. Claims rarely merge, since each worker
+  takes one task at a time; posts and results do.
+- **Too much traffic turns into flow.** Past 150 packets in flight, an edge
+  with more than one packet becomes a moving dashed line whose speed follows
+  its rate, and its count sits at the midpoint.
+- **Bookkeeping never animates.** Extensions, renewals and heartbeats reset
+  arcs in place. Only work moving, results returning, messages, conflicts,
+  deaths and refusals move across the screen.
+- **Speed scales the window, not the flight.** At 4x and 16x a flight still
+  takes 600 ms of wall time, and the merge window grows by the same factor.
+- **Quiet stretches skip.** During playback, a gap of more than three
+  seconds with nothing in flight plays at 10x, so a five-minute model call
+  does not stall a replay. The timeline marks the stretch.
+- **Reduced motion.** With `prefers-reduced-motion`, nothing flies. Nodes
+  and cards change state, and the edge that carried the change flashes once.
+
+### Look
+
+- **Felix brand.** Cyan-teal `hsl(192, 90%, 46%)` is work: task packets, claim
+  timers, the playhead. Results use the same hue at a lighter tint. Inter for
+  names and labels, JetBrains Mono for task ids, offsets, versions, counts and
+  money. Dark by default, with a light theme.
+- **Shape before colour.** Tasks are squares, results circles, messages
+  diamonds, so the view reads without colour. Amber is for things that went
+  wrong and recovered (conflicts, lapsed claims, dead letters); red is only
+  for refusals.
+- **The cat mark** sits in the header next to the run's name, and in the hub
+  when the queue is empty and the run is done.
+- **Clicking** a node, packet, card or timeline marker opens the step panel:
+  the prompt, the response or the tool output, the record's offset and its
+  publisher.
+
+### Validating the look in M0
+
+As in felix-blocks and felix-metro, the look is fixed in a style frame before
+anything talks to Felix. `prototype/` holds a page that plays two fixtures
+through the real drawing code with a stub fold:
+
+- A hand-written run: a planner and four workers, with every record kind,
+  including a worker dying mid-task and its task going to another.
+- A generated burst: 50 workers, 300 tasks posted in two seconds, two deaths
+  and a run that ends with the budget spent.
+
+It is done when three stills (steady work at 8 workers, a death and its
+recovery, the 300-task burst) read at a glance on a laptop and on a phone, a
+short recording of each fixture is in `docs/screenshots/`, the burst holds 60
+frames a second on a laptop, every row of the table above appears at least
+once, and `docs/art.md` describes what the frame draws.
 
 ## Build order
 
 | M | Milestone | Proves |
 |---|---|---|
-| 0 | The viewer, locked: style frame of the timeline, lanes and boards, drawn from a hand-written run | It reads well before Felix is involved |
+| 0 | The viewer, locked: style frame of the swarm view and timeline, drawn from a hand-written run and a generated burst | It reads well, at 8 workers and at 50, before Felix is involved |
 | 1 | Tasks through Felix: `core`, the dev stack, `agents-tool`, `felix-mcp` task tools, scripted planner and workers | Demonstrations 1 and 2 |
 | 2 | Shared state: the board, leases, presence and messages | Demonstration 3 |
 | 3 | Real models and budgets: `agents-run` with a model API, artifacts, spend and rate limits | Demonstration 5 |
-| 4 | Replay a run: the fold, the viewer on felix-gateway, scrub and follow | Demonstration 4, the headline |
+| 4 | Replay a run: the fold, the viewer on felix-gateway, scrub and follow | Demonstrations 4 and 8, the headline |
 | 5 | Grants and the injection demo | Demonstration 6, the other headline |
 | 6 | Any host, at scale: Claude Code and the Agent SDK as hosts, 50 agents, broker restart and failover | Demonstration 7, and it holds under loss |
 | 7 | Self-hosting: `felix-mcp` releases, compose, a quick start | Anyone can run it |
@@ -368,7 +545,7 @@ built behind it.
 - **The board and the log are two writes.** `felix-mcp` writes the board, then the run log record. A crash between them leaves a board write the log does not show. The end-of-run check catches it, and the record's absence is visible as a version gap on that key.
 - **Cost of the demo.** A run with eight workers and a real model costs money. The scripted stand-ins run the same flows for CI and for anyone without a key.
 - **Visibility vs. long calls.** A claim lives 90 seconds without an extension. A `felix-mcp` that stalls longer than that (a paused laptop) loses its task. That is the intended behaviour, and the duplicate check handles the result.
-- **Scope.** No feature that does not serve one of the seven demonstrations or the viewer.
+- **Scope.** No feature that does not serve one of the eight demonstrations or the viewer.
 
 **Felix gaps this design runs into**
 
@@ -382,6 +559,8 @@ Checked against Felix at `97ef3827` (paths in Felix unless marked) and felix-gat
 6. **No time lookup through felix-gateway.** Felix has `offset_for_time` (`crates/sdk/felix-client/src/client/subscribe.rs:248`); the gateway's `ClientMessage` does not (`crates/felix-gateway/src/protocol.rs:74-158`). "Go to 14:05" has to bisect by reads.
 7. **felix-gateway drops the recorded publisher.** Felix records who published each event (`what-felix-is-for.md:164`), but the gateway's `event` and `records` carry only offset and payload (`crates/felix-gateway/src/protocol.rs:195-203, 230-238`). `stamp_sender` covers writes made through the gateway, not the agents' writes over QUIC (`crates/felix-gateway/src/scope.rs:64`). Without it the viewer cannot show verified authorship.
 8. **The Node and Python bindings lag the Rust client.** No `cache_put_if`, `cache_delete_if`, `group_extend`, per-poll visibility, `read`, `offset_for_time` or publisher identity (`crates/sdk/felix-typescript/src/client.rs:282-616`, `group_poll` at `:491-504`). `felix-mcp` is Rust because of it. An agent written against the bindings directly could not take a lease.
+
+9. **felix-gateway drops the broker's append time.** Felix (at `d40db2e4`) stamps every record with its append time by the shard leader's clock: range-read records always carry it (`crates/protocol/felix-wire/src/client/message/fields.rs:192-193`), and subscribed events do when the client asks (`ClientConfig::timestamps`, `crates/sdk/felix-client/src/config.rs:122-126`; `Event::timestamp_micros`, `crates/sdk/felix-client/src/subscribe.rs:235-239`). felix-gateway's `event` and `records` carry only offset and payload (`crates/felix-gateway/src/protocol.rs:195-206, 325-331` in felix-gateway). Records written by agents on different machines then have only their writers' clocks, which skew, so a claim can be drawn before the post it claims. The viewer orders by offset and clamps writer times to rise with it until the gateway passes the broker's time on.
 
 **Decisions on the earlier open questions**
 

@@ -2,17 +2,20 @@
 
 # Felix Agents
 
-Coordination for a team of AI agents, whose only backend is
-[Felix](https://github.com/GetFelix/felix).
+A swarm of workers with [Felix](https://github.com/GetFelix/felix) as its only
+backend.
 
-A planner splits a job into tasks, workers claim them, share what they find,
-lock what they change and spend from a budget. Felix hands out the work, holds
-the shared state, enforces who may write what, and keeps every step in one
-durable log. You can open a run in the browser and scrub back through it to see
-what each agent saw, did, said and spent at any moment.
+A planner fans work out as tasks, many workers claim them, and results flow
+back. Workers join, leave and die mid-task, and the run carries on: Felix hands
+each task to one worker and gives it to another when that worker stops
+answering, holds the state they share, enforces who may write what, and keeps
+every step in one durable log. You can watch the swarm in the browser, with
+tasks travelling to workers and results coming back, and scrub back to any
+moment of the run.
 
-Agents reach Felix through an MCP server, so any MCP host can take part
-without Felix code of its own.
+In the headline demo the workers are AI agents reviewing a pull request. They
+reach Felix through an MCP server, so any MCP host can take part without Felix
+code of its own.
 
 > **Status:** design stage. Nothing runs yet. The plan is in
 > [docs/design.md](docs/design.md) and the work is tracked in
@@ -23,7 +26,7 @@ without Felix code of its own.
 [felix-arena](https://github.com/GetFelix/felix-arena) uses a log as a live feed
 and a replay, [felix-metro](https://github.com/GetFelix/felix-metro) seeks back
 through a long history, and [felix-blocks](https://github.com/GetFelix/felix-blocks)
-is keyed state with many writers. Felix Agents uses all three for agents:
+is keyed state with many writers. Felix Agents uses all three for a swarm:
 
 - **Each task is done once, even when workers die.** A consumer group hands a task to one worker and gives it to another when the first stops answering. A task that keeps failing is dead-lettered instead of retried forever.
 - **Agents don't overwrite each other.** Shared findings and locks are conditional writes, so a stale write is refused and the agent sees what changed.
@@ -35,7 +38,7 @@ is keyed state with many writers. Felix Agents uses all three for agents:
 
 - Start a run with a goal, a budget and a team of agents, against a real model or scripted stand-ins
 - Kill a worker mid-task and watch another pick its task up
-- Follow a run live in the browser: who is working on what, the shared board, locks, messages and spend
+- Watch a run live in the browser: tasks travelling to workers, results coming back, locks on the board, messages and the budget draining
 - Scrub back to any moment of a run and open any step's prompt, response or tool output
 - Plant a prompt injection in a task and watch Felix refuse what the agent tries
 - Add Felix to Claude Code or another MCP host and join a run from there
@@ -78,7 +81,7 @@ when you open a step. [docs/design.md](docs/design.md) has the details.
 
 | M | Milestone | What it proves | State |
 |---|---|---|---|
-| 0 | The viewer, locked | A run reads well before Felix is involved | Planned |
+| 0 | The viewer, locked | The swarm reads well, at 8 workers and at 50, before Felix is involved | Planned |
 | 1 | Tasks through Felix | One worker per task, even when workers die; poison tasks stop | Planned |
 | 2 | Shared state | The board and locks never silently overwrite | Planned |
 | 3 | Real models and budgets | A run never spends past its limit | Planned |

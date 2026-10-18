@@ -21,7 +21,7 @@ and a record of the whole thing you can trust after something went wrong.
 - A small runtime, `agents-run`, that drives a planner and workers against a model API, records spend and heartbeats, and has a scripted stand-in for every role so the demo runs without a model
 - A tool, `agents-tool`, that creates a run's resources, the agents' identities and their grants, and exports a finished run
 - A viewer in the browser that follows a run live and replays it, through felix-gateway
-- One headline demo job: a planner splits a code review or research job into tasks for four to eight workers
+- One headline demo job: a planner splits a pull request review into tasks for four to eight workers
 
 **Out of scope**
 
@@ -383,9 +383,9 @@ Checked against Felix at `97ef3827` (paths in Felix unless marked) and felix-gat
 7. **felix-gateway drops the recorded publisher.** Felix records who published each event (`what-felix-is-for.md:164`), but the gateway's `event` and `records` carry only offset and payload (`crates/felix-gateway/src/protocol.rs:195-203, 230-238`). `stamp_sender` covers writes made through the gateway, not the agents' writes over QUIC (`crates/felix-gateway/src/scope.rs:64`). Without it the viewer cannot show verified authorship.
 8. **The Node and Python bindings lag the Rust client.** No `cache_put_if`, `cache_delete_if`, `group_extend`, per-poll visibility, `read`, `offset_for_time` or publisher identity (`crates/sdk/felix-typescript/src/client.rs:282-616`, `group_poll` at `:491-504`). `felix-mcp` is Rust because of it. An agent written against the bindings directly could not take a lease.
 
-**Open questions**
+**Decisions on the earlier open questions**
 
-- [ ] Which demo job: reviewing a pull request across files, or a research question across sources? The first has a crisp right answer; the second makes better use of the board.
-- [ ] Should `felix-mcp` also speak MCP over HTTP, so a hosted agent can join without a local process? It would then hold tokens for remote callers.
-- [ ] Is 90 seconds the right claim visibility, or should it follow the model's expected latency per task?
-- [ ] One run per Felix namespace, or many runs sharing one with names carrying the run id?
+- **The demo job is a pull request review.** A planner splits the diff by file, workers review files and post findings to the board, and a final task merges them into one review. A review has a right answer: seed a branch with known bugs and score how many the run finds, so a change to the runtime can be judged by more than how the timeline looks. It also gives every feature a natural job. Leases cover files, the board holds cross-file findings, and the injection demo needs no setup, because a hostile comment inside a file under review is exactly how an injection reaches a real agent. A research job needs web access, gives a different answer each time, and has nothing to score.
+- **`felix-mcp` speaks MCP over HTTP as well as stdio, but never holds tokens for callers.** stdio comes first and stays the default. HTTP is added for hosts that cannot start a local process. Each HTTP caller sends its own bearer token, and `felix-mcp` uses that token for that caller's requests and nothing else, so grants still decide what each agent can write. A shared server that kept tokens on behalf of its callers would turn one compromised server into every agent's credentials.
+- **A claim lasts 90 seconds, extended every 30 seconds, whatever the task.** This is the usual visibility timeout plus heartbeat, as in SQS or a lease with renewal. It does not try to predict model latency: a call that takes five minutes keeps its task because `felix-mcp` keeps extending, and a worker that dies loses it within 90 seconds. Tying the timeout to the expected latency would only make recovery slower for long tasks, and the task's own deadline already bounds how long anything can run.
+- **Runs share a namespace, with the run id in each resource name.** A namespace is a team's or a project's, which is how namespaces in Felix and most multi-tenant systems are meant to be used. A run is cheap and short-lived, and its resources (`agents.tasks.<run>` and the rest) are created when it starts and deleted when it is no longer needed. Grants name the run's resources, so one run's agents cannot reach another's. A namespace per run would make starting a run an operator step and spread one team's runs across many namespaces.
